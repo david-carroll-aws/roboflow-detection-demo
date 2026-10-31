@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What's in the picture?</title>
+<style>
+  :root {
+    --bg: #f3f4f1;
+    --ink: #1c2321;
+    --muted: #5d6762;
+    --line: #d3d7d1;
+    --panel: #ffffff;
+    --accent: #f2b705;
+    --accent-ink: #1c2321;
+    --danger: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #151a18;
+      --ink: #eef0ec;
+      --muted: #9aa49e;
+      --line: #2f3834;
+      --panel: #1d2421;
+      --danger: #ff8a80;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.5 "Helvetica Neue", Arial, sans-serif;
+  }
+  main { max-width: 1560px; margin: 0 auto; padding: 26px 8px 12px; }
+  .back { position: absolute; top: 8px; left: 12px; z-index: 5; color: var(--muted); font-size: 0.8rem; line-height: 1.2; text-decoration: none; }
+  .back:hover, .back:focus-visible { color: var(--ink); text-decoration: underline; }
+  h1 { font-size: 2rem; line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 4px; }
+  .lede { color: var(--muted); margin: 0 0 12px; max-width: 60ch; }
+
+  /* Three columns: samples | image | results */
+  .layout {
+    display: grid;
+    grid-template-columns: 546px minmax(0, 1fr) 224px;
+    gap: 20px;
+    align-items: start;
+  }
+  .side {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px;
+  }
+  .side h2 { font-size: 0.95rem; margin: 0 0 10px; }
+  .pager {
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    margin-top: 10px; font-size: 0.85rem; color: var(--muted);
+  }
+  .pager button {
+    padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--bg); color: var(--ink); font: inherit; cursor: pointer;
+  }
+  .pager button:hover:not(:disabled) { border-color: var(--accent); }
+  .pager[hidden] { display: none; }
+  .pager .nums { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; flex: 1; }
+  .pager .nums button { min-width: 30px; padding: 6px 8px; }
+  .pager .nums .dots { align-self: center; padding: 0 2px; }
+  .pager .nums button.current { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+  .pager button:disabled { opacity: 0.4; cursor: default; }
+  .side .empty { color: var(--muted); font-size: 0.85rem; margin: 0; }
+
+  /* Sample thumbnails: three across, scrolling on their own */
+  .samples {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
+    max-height: calc(100vh - 225px); overflow-y: auto;
+    padding: 2px;
+  }
+  .samples button {
+    display: block; width: 100%; padding: 0;
+    border: 2px solid var(--line); border-radius: 6px;
+    background: var(--bg); cursor: pointer; overflow: hidden;
+  }
+  .samples img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; }
+  .samples button:hover, .samples button.active { border-color: var(--accent); }
+  .samples button:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+
+  .drop {
+    display: block;
+    border: 2px dashed var(--line);
+    border-radius: 10px;
+    background: var(--panel);
+    padding: 22px 20px;
+    text-align: center;
+    cursor: pointer;
+    margin-bottom: 16px;
+  }
+  .drop:hover, .drop.over { border-color: var(--accent); }
+  .drop:focus-within { border-color: var(--accent); outline: 3px solid var(--ink); outline-offset: 2px; }
+  .drop strong { display: block; font-size: 1.05rem; }
+  .drop span { color: var(--muted); font-size: 0.9rem; }
+  .drop .privacy {
+    display: inline-block;
+    margin-top: 10px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    background: #1b7f3b;
+    color: #fff;
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+  .drop input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+
+  .canvas-wrap {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px;
+    min-height: 200px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .canvas-wrap .placeholder { color: var(--muted); margin: 0; text-align: center; }
+  /* Fit inside the column, never taller than 75% of the screen,
+     and small images stay their real size instead of being blown up. */
+  canvas {
+    display: none;
+    max-width: 100%; max-height: 75vh;
+    width: auto; height: auto;
+    border-radius: 6px;
+  }
+  canvas.on { display: block; }
+
+  .status { margin: 0 0 10px; color: var(--muted); font-size: 0.9rem; min-height: 1.5em; }
+  .status.err { color: var(--danger); }
+
+  /* Results: one row per type, scrolls on its own for busy photos */
+  .results {
+    list-style: none; margin: 0; padding: 0; display: grid; gap: 6px;
+    max-height: 75vh; overflow-y: auto;
+  }
+  .results li {
+    display: flex; justify-content: space-between; gap: 8px;
+    border: 1px solid var(--line);
+    border-left: 5px solid var(--accent);
+    border-radius: 6px; padding: 6px 10px;
+    font-size: 0.9rem;
+  }
+  .results .conf { font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+
+  /* Smaller laptops: three across so the photo keeps its room */
+  @media (max-width: 1250px) {
+    .layout { grid-template-columns: 330px minmax(0, 1fr) 210px; }
+    .samples { grid-template-columns: repeat(3, 1fr); }
+  }
+
+  /* Phones and narrow windows: stack into one column */
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    .center { order: 1; }
+    .results-col { order: 2; }
+    .samples-col { order: 3; }
+    .samples, .results { max-height: none; }
+    .samples { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); }
+  }
+</style>
+</head>
+<body>
+<a class="back" href="/">← Back to davidcarroll.cloud</a>
+<main>
+  <h1>What's in the picture?</h1>
+  <p class="lede">Upload a photo, or pick a sample, and see what the AI can spot in it.</p>
+
+  <div class="layout">
+    <aside class="side samples-col">
+      <h2>Try a sample</h2>
+      <div class="samples" id="samples"></div>
+      <div class="pager" id="pager" hidden>
+        <button type="button" id="prev">‹ Previous</button>
+        <span class="nums" id="pageNums"></span>
+        <button type="button" id="next">Next ›</button>
+      </div>
+      <p class="empty" id="samplesEmpty" hidden>No sample images yet.</p>
+    </aside>
+
+    <section class="center">
+      <label class="drop" id="drop">
+        <strong>Pick a sample on the left, or upload your own</strong>
+        <span>JPG, PNG, WebP or GIF</span>
+        <span class="privacy">Your photo is checked live and never saved</span>
+        <input type="file" id="file" accept="image/*">
+      </label>
+      <div class="canvas-wrap">
+        <p class="placeholder" id="placeholder">Your image will show up here.</p>
+        <canvas id="canvas" width="10" height="10"></canvas>
+      </div>
+    </section>
+
+    <aside class="side results-col">
+      <h2>Results</h2>
+      <p class="status" id="status" role="status">Nothing checked yet.</p>
+      <ul class="results" id="results"></ul>
+    </aside>
+  </div>
+</main>
+
+<script>
+  // ---- Settings ----
+  const MODEL_ID    = "rfdetr-base";
+  const PROXY_URL   = "/api/detect";        // your server route; leave "" to call Roboflow directly
+  const SAMPLES_URL = "/api/samples";       // server route that lists the images folder
+  const SAMPLES_DIR = "https://d344ey8wsouaej.cloudfront.net/roboflow/images/";  // CloudFront serves the sample photos (cached copy of your server's images)
+  const API_KEY     = "";                   // only used when PROXY_URL is empty (testing only)
+  const MAX_SIDE    = 1280;                 // images are shrunk to this before upload
+  const MIN_CONF    = 0.5;                  // hide detections below this confidence (0 to 1)
+  const LABELS      = "both";               // "confidence", "class", "both" or "none"
+  const LABEL_PX    = 13;                   // box label size on screen, in pixels
+  const PER_PAGE    = 35;                   // sample thumbnails per page
+  const NAME_MAX    = 30;                   // longest sample name shown before "…"
+  const SAVED_DELAY = 500;                  // ms to wait before showing a saved sample's boxes
+  // ------------------
+
+  const $ = (id) => document.getElementById(id);
+  const canvas = $("canvas"), ctx = canvas.getContext("2d");
+  const statusEl = $("status"), resultsEl = $("results"), drop = $("drop");
+  const samplesEl = $("samples");
+
+  $("file").addEventListener("change", (e) => {
+    if (e.target.files[0]) { clearActive(); run(e.target.files[0]); }
+    e.target.value = "";   // lets the same file be picked again
+  });
+  ["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave", "drop"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+  drop.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) { clearActive(); run(f); } });
+
+  // ---- Sample names, listed by the server ----
+  function prettyName(file) {
+    const clean = file.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim();
+    return clean.length > NAME_MAX ? clean.slice(0, NAME_MAX - 1) + "…" : clean;
+  }
+
+  let allSamples = [], page = 0, activeName = null;
+
+  async function loadSamples() {
+    try {
+      const res = await fetch(SAMPLES_URL);
+      allSamples = res.ok ? await res.json() : [];
+      if (!allSamples.length) { $("samplesEmpty").hidden = false; return; }
+      $("prev").addEventListener("click", () => showPage(page - 1));
+      $("next").addEventListener("click", () => showPage(page + 1));
+      showPage(0);
+    } catch {
+      $("samplesEmpty").hidden = false;
+    }
+  }
+
+  function showPage(n) {
+    const pages = Math.ceil(allSamples.length / PER_PAGE);
+    page = Math.max(0, Math.min(n, pages - 1));
+    samplesEl.innerHTML = "";
+    samplesEl.scrollTop = 0;
+    allSamples.slice(page * PER_PAGE, (page + 1) * PER_PAGE).forEach((name) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.title = prettyName(name);     // name on hover
+        const img = document.createElement("img");
+        img.src = SAMPLES_DIR + encodeURIComponent(name);
+        img.alt = prettyName(name);
+        img.loading = "lazy";             // only loads thumbnails as you scroll to them
+        btn.appendChild(img);
+        if (name === activeName) btn.classList.add("active");   // keeps the highlight when paging back
+        btn.addEventListener("click", () => runSample(name, btn));
+        samplesEl.appendChild(btn);
+    });
+    $("pager").hidden = pages < 2;
+    const nums = $("pageNums");
+    nums.innerHTML = "";
+    // Sliding window: first, last, current and its neighbours, with dots in the gaps.
+    const keep = new Set([0, pages - 1, page - 1, page, page + 1]);
+    if (page <= 3) { for (let i = 2; i <= 5; i++) keep.add(i); }    // near the start, show pages 1 to 6
+    if (page >= pages - 4) { for (let i = 3; i <= 6; i++) keep.add(pages - i); }   // same near the end
+    const shownPages = [...keep].filter((i) => i >= 0 && i < pages).sort((a, b) => a - b);
+    let last = -1;
+    shownPages.forEach((i) => {
+      if (i - last > 1) {
+        const dots = document.createElement("span");
+        dots.textContent = "…";
+        dots.className = "dots";
+        nums.appendChild(dots);
+      }
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = i + 1;
+      b.setAttribute("aria-label", `Page ${i + 1}`);
+      if (i === page) { b.classList.add("current"); b.setAttribute("aria-current", "page"); }
+      b.addEventListener("click", () => showPage(i));
+      nums.appendChild(b);
+      last = i;
+    });
+    $("prev").disabled = page === 0;
+    $("next").disabled = page >= pages - 1;
+  }
+
+  function clearActive() {
+    activeName = null;
+    samplesEl.querySelectorAll("button.active").forEach((b) => b.classList.remove("active"));
+  }
+
+  async function runSample(name, btn) {
+    clearActive();
+    activeName = name;
+    btn.classList.add("active");
+    try {
+      const res = await fetch(SAMPLES_DIR + encodeURIComponent(name));
+      if (!res.ok) throw new Error("That sample image couldn't be loaded.");
+      run(await res.blob(), SAMPLES_URL + "/detect/" + encodeURIComponent(name));
+    } catch (err) {
+      setStatus(err.message, true);
+    }
+  }
+
+  // ---- Detection ----
+  function setStatus(msg, isErr) {
+    statusEl.textContent = msg;
+    statusEl.classList.toggle("err", !!isErr);
+  }
+
+  function loadImage(file) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("That file couldn't be read as an image."));
+      img.src = URL.createObjectURL(file);
+    });
+  }
+
+  async function run(file, savedUrl) {
+    resultsEl.innerHTML = "";
+    setStatus("Checking image…");
+
+    try {
+      const img = await loadImage(file);
+      const scale = Math.min(1, MAX_SIDE / Math.max(img.width, img.height));
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      $("placeholder").hidden = true;
+      canvas.classList.add("on");
+
+      let data;
+      if (savedUrl) {
+        // Samples: the server checks each one once and reuses the saved answer.
+        const res = await fetch(savedUrl);
+        if (!res.ok) throw new Error(`The model request failed (${res.status}).`);
+        data = await res.json();
+        if (data.cached) await new Promise((r) => setTimeout(r, SAVED_DELAY));   // only repeat clicks, so a saved answer doesn't look instant
+      } else {
+        const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.9));
+        data = await detect(blob);
+      }
+      draw(scaled(data));
+    } catch (err) {
+      setStatus(err.message || "Something went wrong.", true);
+    }
+  }
+
+  async function detect(blob) {
+    let res;
+    if (PROXY_URL) {
+      const form = new FormData();
+      form.append("image", blob, "upload.jpg");
+      res = await fetch(PROXY_URL, { method: "POST", body: form });
+    } else {
+      if (!API_KEY) throw new Error("Add your API key or a PROXY_URL in the script settings.");
+      const b64 = await new Promise((resolve) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result.split(",")[1]);
+        fr.readAsDataURL(blob);
+      });
+      res = await fetch(`https://serverless.roboflow.com/${MODEL_ID}?api_key=${encodeURIComponent(API_KEY)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: b64,
+      });
+    }
+    if (!res.ok) throw new Error(`The model request failed (${res.status}). Check your key and model ID.`);
+    return res.json();
+  }
+
+  // Each class gets its own color, the same one every time.
+  const PALETTE = ["#c6ff00", "#00e5ff", "#ff2bd6", "#ff9100", "#7c4dff", "#00e676", "#ff5252", "#ffd600", "#40c4ff", "#e040fb"];
+  function colorFor(name) {
+    let h = 0;
+    for (const ch of String(name)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return PALETTE[h % PALETTE.length];
+  }
+
+  // Fit boxes to the canvas, whatever size Roboflow saw the image at.
+  function scaled(data) {
+    const k = data.image && data.image.width ? canvas.width / data.image.width : 1;
+    return (data.predictions || []).map((p) => ({ ...p, x: p.x * k, y: p.y * k, width: p.width * k, height: p.height * k }));
+  }
+
+  function draw(all) {
+    const predictions = all
+      .filter((p) => p.confidence >= MIN_CONF)
+      .sort((a, b) => b.confidence - a.confidence);
+
+    // Same on-screen label size for every photo, whatever its resolution.
+    const shown = canvas.getBoundingClientRect().width || canvas.width;
+    const fontSize = LABEL_PX * canvas.width / shown;
+    ctx.lineWidth = 2 * canvas.width / shown;
+    ctx.font = `600 ${fontSize}px Arial`;
+    ctx.textBaseline = "top";
+
+    // Draw weakest first so the strongest detections end up on top.
+    [...predictions].reverse().forEach((p) => {
+      const color = colorFor(p.class);
+      const x = p.x - p.width / 2, y = p.y - p.height / 2;
+      ctx.strokeStyle = color;
+      ctx.strokeRect(x, y, p.width, p.height);
+
+      if (LABELS === "none") return;
+      const pct = `${Math.round(p.confidence * 100)}%`;
+      const label = LABELS === "class" ? p.class : LABELS === "both" ? `${p.class} ${pct}` : pct;
+      const padX = 3, h = fontSize * 1.3;
+      const w = ctx.measureText(label).width + padX * 2;
+      const ly = y - h < 0 ? y : y - h;
+      ctx.fillStyle = color;
+      ctx.fillRect(x, ly, w, h);
+      ctx.fillStyle = "#000";
+      ctx.fillText(label, x + padX, ly + (h - fontSize) / 2);
+    });
+
+    if (!predictions.length) {
+      setStatus("Nothing detected in this image.");
+      return;
+    }
+    setStatus(`Found ${predictions.length} detection${predictions.length > 1 ? "s" : ""}.`);
+
+    // Group by type: "person (100)" with the best confidence for that type.
+    const groups = new Map();
+    predictions.forEach((p) => {
+      const g = groups.get(p.class) || { count: 0, best: 0 };
+      g.count += 1;
+      g.best = Math.max(g.best, p.confidence);
+      groups.set(p.class, g);
+    });
+    [...groups.entries()]
+      .sort((a, b) => b[1].count - a[1].count || b[1].best - a[1].best)
+      .forEach(([cls, g]) => {
+        const li = document.createElement("li");
+        li.style.borderLeftColor = colorFor(cls);
+        const name = document.createElement("span");
+        name.textContent = `${cls} (${g.count})`;
+        const conf = document.createElement("span");
+        conf.className = "conf";
+        conf.textContent = `${Math.round(g.best * 100)}% sure`;
+        li.append(name, conf);
+        resultsEl.appendChild(li);
+      });
+  }
+
+  loadSamples();
+</script>
+</body>
+</html>
