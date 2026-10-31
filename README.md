@@ -81,6 +81,6 @@ Browser  -->  Flask server  -->  Roboflow (rfdetr-base)
 
 The demo's samples come from the [COCO dataset](https://cocodataset.org), as published on Roboflow Universe. COCO images have their own licences, so check its terms before reusing or redistributing them.
 
-## Credits -
+## Credits --
 
 Built with [Roboflow](https://roboflow.com), [Flask](https://flask.palletsprojects.com) and [Amazon CloudFront](https://aws.amazon.com/cloudfront/).
